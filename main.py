@@ -12,6 +12,10 @@ raw_dir = root/raw
 staging_dir = root/staging
 archive_dir = root/archive
 
+def make_dirs():
+    for p in [raw_dir, staging_dir, archive_dir]:
+        p.mkdir(parents=True, exist_ok=True)
+
 def get_datetime(s):
     return datetime.datetime(int(s[5:9]), int(s[10:12]), int(s[13:15]), int(s[16:18]), int(s[19:21]))
 
@@ -39,6 +43,8 @@ def archive_files(files):
         p.rename(d/p.name)
 
 def main():
+
+    make_dirs()
 
     while(True):
         # convert any files in root/rtsp folder
