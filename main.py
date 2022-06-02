@@ -1,17 +1,16 @@
-import sys, datetime, subprocess, time, logging, argparse
+import sys, datetime, subprocess, time, logging, argparse, re
 from pathlib import Path
 
 logging.getLogger().setLevel(logging.INFO)
 
-args = None
+args = None             # set later
+fn_prefix = None        # set later
 
-# root = Path(f'/home/brandon/cam')
-root = Path(f'/mnt/e/cam')
-
-encoding_lib = 'libx264'
+root = Path(f'/home/brandon/cam')
+# root = Path(f'/mnt/e/cam')
 
 raw = 'rtsp'
-staging = 'h264'
+staging = 'staging'
 archive = 'archive'
 
 raw_dir = root/raw
@@ -24,7 +23,8 @@ def make_dirs():
         p.mkdir(parents=True, exist_ok=True)
 
 def get_datetime(s):
-    return datetime.datetime(int(s[5:9]), int(s[10:12]), int(s[13:15]), int(s[16:18]), int(s[19:21]))
+    l = [int(x) for x in re.search('_([0-9]{4})-([0-9]{2})-([0-9]{2})_([0-9]{2})-([0-9]{2})', s).groups()]
+    return datetime.datetime(*l)
 
 def get_files_older_than(path, seconds, globstr):
     files = [x for x in path.glob(globstr)]
@@ -38,19 +38,19 @@ def get_files_older_than(path, seconds, globstr):
     
 def launch_converter_process(path, mode, encoding_preset):
 
-    singlepass_x264 = rf'ffmpeg -i input -vcodec {encoding_lib} -preset {encoding_preset} -timecode 00:00:00.00 output.mp4'
+    singlepass_x264 = rf'ffmpeg -y -i input -vcodec {args.vcodec} -preset {args.preset} -timecode 00:00:00.00 output.mp4'
 
     twopass_x264 =\
-    rf"ffmpeg -y -i input -c:v {encoding_lib} -preset {args.preset} -b:v {args.bitrate} -timecode 00:00:00.00 " \
+    rf"ffmpeg -y -i input -c:v {args.vcodec} -preset {args.preset} -b:v {args.bitrate} -timecode 00:00:00.00 " \
     rf"-pass 1 -an -f null /dev/null " \
-    rf"&& ffmpeg -i input -c:v {encoding_lib} -preset {args.preset} -b:v {args.bitrate} -timecode 00:00:00.00 " \
+    rf"&& ffmpeg -i input -c:v {args.vcodec} -preset {args.preset} -b:v {args.bitrate} -timecode 00:00:00.00 " \
     rf"-pass 2 -c:a aac -b:a 128k output.mp4"
 
     if args.mode == 'lowres':
         cmdline = singlepass_x264[:]
     elif args.mode == 'highres':
         cmdline = twopass_x264[:]
-    new_path = staging_dir/path.name.replace(raw, staging)
+    new_path = staging_dir/path.name.replace(raw, fn_prefix)
     cmdline = cmdline.replace('input', str(path)).replace('output.mp4', str(new_path))
     logging.info(f'running command line: {cmdline}')
     res = subprocess.run(cmdline, shell=True)
@@ -64,11 +64,15 @@ def archive_files(files):
         p.rename(d/p.name)
 
 def main():
+
+    global args, fn_prefix
+
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", help="should be one of [lowres|highres] depending on if we DVR 2.7K or 640p video from cam.")
     parser.add_argument("-preset", help="the 'preset' option passed through to ffmpeg, e.g [fast|slow|medium|...]")
     parser.add_argument('-bitrate', help="if mode=highres, then this specifies the bitrate, passed through to ffmpeg via -b:v [bitrate], e.g. '2600k' for 200MB 10min files")
-    global args
+    parser.add_argument('-vcodec', help="passed as -vcodec or -c:v [name], defaults to libx264")
+
     args = parser.parse_args()
     if args.mode not in {'lowres','highres'}:
         logging.error('mode argument must be one of [lowres|highres]')
@@ -79,6 +83,10 @@ def main():
     if args.mode == 'highres' and not args.bitrate:
         args.bitrate = '2600k'
         logging.info('no bitrate specified for highres 2pass, using default="2600k" which gives 200MB 10min files')
+    if not args.vcodec:
+        logging.info('using default video code: libx264')
+        args.vcodec = 'libx264'
+    fn_prefix = f'h{args.vcodec[-3:]}'
 
     make_dirs()
 
