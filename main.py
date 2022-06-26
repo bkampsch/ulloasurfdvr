@@ -12,14 +12,15 @@ root = Path(f'/home/brandon/cam')
 raw = 'rtsp'
 staging = 'staging'
 archive = 'archive'
+error = 'error'
 
 raw_dir = root/raw
 staging_dir = root/staging
 archive_dir = root/archive
-
+error_dir = root/error
 
 def make_dirs():
-    for p in [raw_dir, staging_dir, archive_dir]:
+    for p in [raw_dir, staging_dir, archive_dir, error_dir]:
         p.mkdir(parents=True, exist_ok=True)
 
 def get_datetime(s):
@@ -73,9 +74,11 @@ def main():
     parser.add_argument('-bitrate', help="if mode=highres, then this specifies the bitrate, passed through to ffmpeg via -b:v [bitrate], e.g. '2600k' for 200MB 10min files")
     parser.add_argument('-vcodec', help="passed as -vcodec or -c:v [name], defaults to libx264")
 
+    # sys.argv = ['/home/brandon/cam/ulloasurfdvr/main.py', 'lowres', '-preset', 'veryfast', '-vcodec', 'libx265']
+
     args = parser.parse_args()
-    if args.mode not in {'lowres','highres'}:
-        logging.error('mode argument must be one of [lowres|highres]')
+    if args.mode not in {'archive', 'lowres','highres'}:
+        logging.error('mode argument must be one of [archive|lowres|highres]')
         sys.exit()
     if not args.preset:
         args.preset = 'medium'
@@ -91,18 +94,31 @@ def main():
     make_dirs()
 
     while(True):
-        # convert any files in root/rtsp folder
-        ready2convert = get_files_older_than(root/raw_dir, 605, 'rtsp*.mp4')
-        for f in ready2convert:
-            ret = launch_converter_process(f, args.mode, args.preset)
-            if ret == 0:
-                f.unlink()
+
+        if args.mode in {'lowres', 'highres'}:
+
+            # convert any files in root/rtsp folder
+            ready2convert = get_files_older_than(root/raw_dir, 605, 'rtsp*.mp4')
+            for f in ready2convert:
+                ret = launch_converter_process(f, args.mode, args.preset)
+                if ret == 0:
+                    f.unlink()
+                else:
+                    logging.error(f'non-zero return code {ret} indicates a problem converting to smaller file size. moving file to "error" directory')
+                    f.rename(root/error_dir/f.name)
+            
+            # archive files into daily folders
+            archive_files(get_files_older_than(staging_dir, 1*24*60*60, f'*.mp4'))
         
-        # archive files into daily folders
-        archive_files(get_files_older_than(staging_dir, 1*24*60*60, f'{staging}*.mp4'))
-        
-        logging.info('sleeping 10 seconds...')
-        time.sleep(10)
+            logging.info('sleeping 10 seconds...')
+            time.sleep(10)
+
+        elif args.mode == 'archive':
+            archive_files(get_files_older_than(raw_dir, 1*24*60*60, f'*.mp4'))
+            
+            logging.info('sleeping 600 seconds...')
+            time.sleep(600)
+
 
 if __name__ == "__main__":
     main()
